@@ -16,23 +16,46 @@ function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [alternativeProvider, setAlternativeProvider] = useState(null);
+
+  const getProviderInstance = (providerName) => {
+    switch (providerName) {
+      case 'google.com':
+        return googleProvider;
+      case 'github.com':
+        return githubProvider;
+      case 'facebook.com':
+        return facebookProvider;
+      default:
+        return null;
+    }
+  };
+
+  const getProviderName = (provider) => {
+    if (provider instanceof GithubAuthProvider) return "GitHub";
+    if (provider instanceof GoogleAuthProvider) return "Google";
+    if (provider instanceof FacebookAuthProvider) return "Facebook";
+    return "email/contraseña";
+  };
 
   const handleAuthError = async (error, provider) => {
     setError(""); // Limpiar error anterior
+    setAlternativeProvider(null);
     
     if (error.code === 'auth/account-exists-with-different-credential') {
       try {
-        // Obtener los métodos de inicio de sesión existentes para el email
         const email = error.customData.email;
         const methods = await fetchSignInMethodsForEmail(auth, email);
         
-        let providerName = "";
-        if (provider instanceof GithubAuthProvider) providerName = "GitHub";
-        else if (provider instanceof GoogleAuthProvider) providerName = "Google";
-        else if (provider instanceof FacebookAuthProvider) providerName = "Facebook";
-        
         if (methods.length > 0) {
-          setError(`Ya existe una cuenta con el email ${email}. Por favor, inicia sesión con ${methods[0]} y luego podrás vincular tu cuenta de ${providerName}.`);
+          const alternativeProviderInstance = getProviderInstance(methods[0]);
+          setAlternativeProvider(alternativeProviderInstance);
+          
+          setError(
+            `Ya existe una cuenta con el email ${email}. ` +
+            `Debes iniciar sesión primero con ${methods[0]} ` +
+            `y luego podrás vincular tu cuenta de ${getProviderName(provider)}.`
+          );
         }
       } catch {
         setError("Error al verificar la cuenta. Por favor, intenta con otro método de inicio de sesión.");
@@ -114,6 +137,20 @@ function Login() {
             fontSize: '0.875rem'
           }}>
             {error}
+            {alternativeProvider && (
+              <button 
+                onClick={() => handleAuth(alternativeProvider)}
+                className="btn btn-primary btn-icon"
+                style={{
+                  marginTop: '0.75rem',
+                  width: '100%',
+                  fontSize: '0.875rem'
+                }}
+              >
+                <i className="fas fa-sign-in-alt"></i>
+                Iniciar sesión con el método requerido
+              </button>
+            )}
           </div>
         )}
         
