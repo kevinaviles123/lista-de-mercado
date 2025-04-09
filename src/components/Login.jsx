@@ -7,7 +7,9 @@ import {
   fetchSignInMethodsForEmail,
   GithubAuthProvider,
   GoogleAuthProvider,
-  FacebookAuthProvider
+  FacebookAuthProvider,
+  linkWithCredential,
+  OAuthCredential
 } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 
@@ -17,6 +19,7 @@ function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [alternativeProvider, setAlternativeProvider] = useState(null);
+  const [pendingCred, setPendingCred] = useState(null);
 
   const getProviderInstance = (providerName) => {
     switch (providerName) {
@@ -31,33 +34,54 @@ function Login() {
     }
   };
 
-  const getProviderName = (provider) => {
-    if (provider instanceof GithubAuthProvider) return "GitHub";
-    if (provider instanceof GoogleAuthProvider) return "Google";
-    if (provider instanceof FacebookAuthProvider) return "Facebook";
-    return "email/contraseña";
+  const getProviderName = (providerName) => {
+    switch (providerName) {
+      case 'google.com':
+        return "Google";
+      case 'github.com':
+        return "GitHub";
+      case 'facebook.com':
+        return "Facebook";
+      default:
+        return "email/contraseña";
+    }
   };
 
   const handleAuthError = async (error, provider) => {
+    console.log("Error de autenticación:", error);
     setError(""); // Limpiar error anterior
     setAlternativeProvider(null);
+    setPendingCred(null);
     
     if (error.code === 'auth/account-exists-with-different-credential') {
       try {
         const email = error.customData.email;
+        console.log("Email asociado:", email);
+        
+        // Guardar la credencial pendiente
+        if (error.customData._credential) {
+          console.log("Credencial pendiente encontrada");
+          setPendingCred(error.customData._credential);
+        }
+        
         const methods = await fetchSignInMethodsForEmail(auth, email);
+        console.log("Métodos disponibles:", methods);
         
         if (methods.length > 0) {
-          const alternativeProviderInstance = getProviderInstance(methods[0]);
+          const firstProvider = methods[0];
+          console.log("Primer proveedor encontrado:", firstProvider);
+          
+          const alternativeProviderInstance = getProviderInstance(firstProvider);
           setAlternativeProvider(alternativeProviderInstance);
           
           setError(
             `Ya existe una cuenta con el email ${email}. ` +
-            `Debes iniciar sesión primero con ${methods[0]} ` +
-            `y luego podrás vincular tu cuenta de ${getProviderName(provider)}.`
+            `Debes iniciar sesión primero con ${getProviderName(firstProvider)} ` +
+            `para poder vincular tu cuenta de ${getProviderName(provider.providerId)}.`
           );
         }
-      } catch {
+      } catch (innerError) {
+        console.error("Error al manejar vinculación:", innerError);
         setError("Error al verificar la cuenta. Por favor, intenta con otro método de inicio de sesión.");
       }
     } else if (error.code === 'auth/popup-closed-by-user') {
@@ -72,7 +96,25 @@ function Login() {
   const handleAuth = async (provider) => {
     try {
       setError(""); // Limpiar error anterior
-      await signInWithPopup(auth, provider);
+      console.log("Intentando iniciar sesión con:", provider.providerId);
+      
+      const result = await signInWithPopup(auth, provider);
+      console.log("Inicio de sesión exitoso:", result);
+      
+      // Si hay una credencial pendiente, intentar vincular
+      if (pendingCred) {
+        try {
+          console.log("Intentando vincular credencial pendiente");
+          await linkWithCredential(result.user, pendingCred);
+          setPendingCred(null);
+          setError("¡Cuentas vinculadas exitosamente!");
+          setTimeout(() => setError(""), 3000);
+        } catch (linkError) {
+          console.error("Error al vincular cuentas:", linkError);
+          setError("Error al vincular las cuentas. Por favor, intenta nuevamente.");
+        }
+      }
+      
       navigate("/home");
     } catch (error) {
       console.error("Error de autenticación:", error);
