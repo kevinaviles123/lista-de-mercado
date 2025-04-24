@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { auth, db } from "../firebaseConfig";
 import { collection, addDoc, updateDoc, doc, getDocs, deleteDoc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
@@ -18,7 +18,6 @@ function Home() {
   const [filterGroup, setFilterGroup] = useState(""); // Nuevo filtro por grupo
   const [filterPrice, setFilterPrice] = useState({ min: "", max: "" });
   const [priceHistory, setPriceHistory] = useState([]);
-  const [monthlyExpenses, setMonthlyExpenses] = useState({});
   const [categories, setCategories] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [view, setView] = useState("products"); // productos, análisis, ayuda
@@ -26,6 +25,8 @@ function Home() {
   // Modal de confirmación para eliminación
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [productToDelete, setProductToDelete] = useState(null);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   // Obtener productos y categorías
   useEffect(() => {
@@ -61,7 +62,6 @@ function Home() {
   const generateSampleData = (products) => {
     const months = ["Ene", "Feb", "Mar", "Abr", "May", "Jun"];
     const prices = {};
-    const expenses = {};
     
     // Simular historial de precios para cada producto con precios más realistas
     products.forEach(product => {
@@ -80,16 +80,7 @@ function Home() {
       });
     });
     
-    // Simular gastos mensuales más realistas
-    months.forEach((month, index) => {
-      // Gastos que siguen un patrón estacional con algo de variación aleatoria
-      const baseExpense = 3000;
-      const seasonalFactor = Math.sin((index / 6) * Math.PI) * 1000;
-      expenses[month] = Math.floor(baseExpense + seasonalFactor + (Math.random() * 800));
-    });
-    
     setPriceHistory(prices);
-    setMonthlyExpenses(expenses);
   };
 
   const handleAddProduct = async () => {
@@ -130,51 +121,6 @@ function Home() {
     }
   };
 
-  const handleUpdateProduct = async (id, updatedPrice) => {
-    try {
-      const productToUpdate = products.find(p => p.id === id);
-      
-      // Crear un registro más detallado para el historial de precios
-      const now = new Date();
-      const newPriceRecord = {
-        date: now,
-        price: parseFloat(updatedPrice),
-        previousPrice: parseFloat(productToUpdate.price),
-        timestamp: now.getTime(),
-        year: now.getFullYear(),
-        month: now.getMonth(),
-        day: now.getDate()
-      };
-      
-      const newPriceHistory = [
-        ...(productToUpdate.priceHistory || []),
-        newPriceRecord
-      ];
-      
-      await updateDoc(doc(db, "products", id), { 
-        price: parseFloat(updatedPrice),
-        priceHistory: newPriceHistory,
-        lastUpdated: now
-      });
-      
-      // Actualizar producto en la interfaz
-      setProducts(products.map(p => 
-        p.id === id 
-          ? { 
-              ...p, 
-              price: parseFloat(updatedPrice), 
-              priceHistory: newPriceHistory,
-              lastUpdated: now
-            } 
-          : p
-      ));
-      
-      alert("Producto actualizado exitosamente.");
-    } catch (error) {
-      console.error("Error al actualizar producto:", error);
-    }
-  };
-  
   const handleToggleProductStatus = async (id) => {
     try {
       const productToToggle = products.find(p => p.id === id);
@@ -271,7 +217,7 @@ function Home() {
   });
 
   // Obtener grupos únicos para el tipo seleccionado
-  const getUniqueGroups = (type) => {
+  const getUniqueGroups = useCallback((type) => {
     if (!type) return [];
     
     const groups = new Set();
@@ -280,7 +226,7 @@ function Home() {
       .forEach(c => groups.add(c.group));
     
     return Array.from(groups).sort();
-  };
+  }, [categories]);
 
   const uniqueGroups = getUniqueGroups(filterType);
 
@@ -298,7 +244,59 @@ function Home() {
       console.log(`Grupos de alimentos: ${gruposAlimentos.length} (${gruposAlimentos.join(', ')})`);
       console.log(`Grupos de limpieza: ${gruposLimpieza.length} (${gruposLimpieza.join(', ')})`);
     }
-  }, [categories]);
+  }, [categories, categoriesByType.alimento.length, categoriesByType.limpieza.length, categoriesByType.otros.length, getUniqueGroups]);
+
+  // Función para editar un producto
+  const handleEditProduct = async (updatedProduct) => {
+    try {
+      const productToUpdate = products.find(p => p.id === updatedProduct.id);
+      const now = new Date();
+
+      // Solo crear nuevo registro en el historial si el precio ha cambiado
+      let newPriceHistory = [...(productToUpdate.priceHistory || [])];
+      
+      if (parseFloat(updatedProduct.price) !== parseFloat(productToUpdate.price)) {
+        const newPriceRecord = {
+          date: now,
+          price: parseFloat(updatedProduct.price),
+          previousPrice: parseFloat(productToUpdate.price),
+          timestamp: now.getTime(),
+          year: now.getFullYear(),
+          month: now.getMonth(),
+          day: now.getDate()
+        };
+        newPriceHistory.push(newPriceRecord);
+      }
+
+      const updatedFields = {
+        name: updatedProduct.name,
+        brand: updatedProduct.brand,
+        price: parseFloat(updatedProduct.price),
+        category: updatedProduct.category,
+        store: updatedProduct.store,
+        unit: updatedProduct.unit,
+        priceHistory: newPriceHistory,
+        lastUpdated: now
+      };
+
+      await updateDoc(doc(db, "products", updatedProduct.id), updatedFields);
+
+      // Actualizar el producto en el estado local
+      setProducts(products.map(p => 
+        p.id === updatedProduct.id ? { 
+          ...p, 
+          ...updatedFields
+        } : p
+      ));
+
+      setShowEditModal(false);
+      setEditingProduct(null);
+      alert("Producto actualizado exitosamente.");
+    } catch (error) {
+      console.error("Error al actualizar producto:", error);
+      alert("Error al actualizar el producto. Por favor, intenta de nuevo.");
+    }
+  };
 
   return (
     <div className="home-container">
@@ -337,6 +335,130 @@ function Home() {
                 boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
               }}>
                 Sí, eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Modal de edición de producto */}
+      {showEditModal && editingProduct && (
+        <div className="modal-overlay">
+          <div className="modal-container">
+            <div className="modal-header">
+              <h3>Editar Producto</h3>
+              <button className="modal-close" onClick={() => {
+                setShowEditModal(false);
+                setEditingProduct(null);
+              }}>
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <div className="modal-content">
+              <div className="form-grid">
+                <div className="input-group">
+                  <div className="input-with-icon">
+                    <i className="fas fa-store"></i>
+                    <input 
+                      type="text" 
+                      placeholder="Tienda" 
+                      className="input-field" 
+                      value={editingProduct.store || ''}
+                      onChange={(e) => setEditingProduct({...editingProduct, store: e.target.value})} 
+                    />
+                  </div>
+                </div>
+                <div className="input-group">
+                  <div className="input-with-icon">
+                    <i className="fas fa-layer-group"></i>
+                    <select 
+                      className="input-field categoria-selector" 
+                      value={editingProduct.category || ''}
+                      onChange={(e) => setEditingProduct({...editingProduct, category: e.target.value})}
+                    >
+                      <option value="">Selecciona una categoría</option>
+                      {categories.map(cat => (
+                        <option key={cat.id} value={cat.name}>{cat.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="input-group">
+                  <div className="input-with-icon">
+                    <i className="fas fa-shopping-cart"></i>
+                    <input 
+                      type="text" 
+                      placeholder="Nombre del producto" 
+                      className="input-field" 
+                      value={editingProduct.name || ''}
+                      onChange={(e) => setEditingProduct({...editingProduct, name: e.target.value})} 
+                    />
+                  </div>
+                </div>
+                <div className="input-group">
+                  <div className="input-with-icon">
+                    <i className="fas fa-tag"></i>
+                    <input 
+                      type="text" 
+                      placeholder="Marca" 
+                      className="input-field" 
+                      value={editingProduct.brand || ''}
+                      onChange={(e) => setEditingProduct({...editingProduct, brand: e.target.value})} 
+                    />
+                  </div>
+                </div>
+                <div className="input-group">
+                  <div className="input-with-icon">
+                    <i className="fas fa-dollar-sign"></i>
+                    <input 
+                      type="number" 
+                      placeholder="Precio" 
+                      className="input-field" 
+                      value={editingProduct.price || ''}
+                      onChange={(e) => setEditingProduct({...editingProduct, price: e.target.value})} 
+                    />
+                  </div>
+                </div>
+                <div className="input-group">
+                  <div className="input-with-icon">
+                    <i className="fas fa-balance-scale"></i>
+                    <input 
+                      type="text" 
+                      placeholder="Unidad de medida" 
+                      className="input-field" 
+                      value={editingProduct.unit || ''}
+                      onChange={(e) => setEditingProduct({...editingProduct, unit: e.target.value})} 
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button 
+                className="btn-cancel" 
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingProduct(null);
+                }}
+              >
+                Cancelar
+              </button>
+              <button 
+                className="btn-confirm-edit"
+                onClick={() => handleEditProduct(editingProduct)}
+                style={{
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  padding: '12px 20px',
+                  fontSize: '1.1rem',
+                  fontWeight: 'bold',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                }}
+              >
+                Guardar Cambios
               </button>
             </div>
           </div>
@@ -511,34 +633,6 @@ function Home() {
           <div className="product-list">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 className="list-title">Lista de Productos</h3>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button 
-                  onClick={() => {
-                    if (filteredProducts.length > 0) {
-                      handleDeleteProduct(filteredProducts[0].id);
-                    } else {
-                      alert('No hay productos para eliminar');
-                    }
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: '#ef4444',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '10px 15px',
-                    fontSize: '1rem',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
-                  }}
-                >
-                  <i className="fas fa-trash-alt" style={{ marginRight: '8px' }}></i>
-                  Eliminar Productos
-                </button>
-              </div>
             </div>
             
             <div className="categorias-container">
@@ -941,11 +1035,14 @@ function Home() {
                   </div>
                   <div className="product-actions">
                     <button 
-                      onClick={() => handleUpdateProduct(p.id, Number(p.price) + 1)} 
-                      className="btn-update btn-icon"
+                      onClick={() => {
+                        setEditingProduct(p);
+                        setShowEditModal(true);
+                      }} 
+                      className="btn-edit btn-icon"
                     >
-                      <i className="fas fa-sync-alt"></i>
-                      Actualizar
+                      <i className="fas fa-edit"></i>
+                      Editar
                     </button>
                     <button 
                       onClick={() => handleToggleProductStatus(p.id)} 
@@ -972,38 +1069,6 @@ function Home() {
       {view === "analysis" && (
         <div className="analysis-container">
           <GastosPorCategoria />
-          
-          <div className="chart-container">
-            <h3 className="chart-title">Resumen de Gastos por Mes</h3>
-            <div className="chart-placeholder">
-              {/* Etiquetas de valores en el eje vertical */}
-              <div className="chart-axis-label">$6,000</div>
-              <div className="chart-axis-label">$4,000</div>
-              <div className="chart-axis-label">$2,000</div>
-              
-              <div className="chart-data">
-                {Object.entries(monthlyExpenses).map(([month, expense]) => (
-                  <div key={month} className="chart-bar-container">
-                    <div 
-                      className="chart-bar" 
-                      style={{ 
-                        height: `${(expense / Math.max(...Object.values(monthlyExpenses))) * 200}px`,
-                      }}
-                    >
-                      <div className="chart-value">${expense.toLocaleString()}</div>
-                    </div>
-                    <div className="chart-label">{month}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="chart-legend">
-              <div className="legend-title">Gastos totales por mes</div>
-              <div className="legend-description">
-                Comparativa de gastos mensuales en la lista de compras. Total: ${Object.values(monthlyExpenses).reduce((sum, expense) => sum + expense, 0).toLocaleString()}
-              </div>
-            </div>
-          </div>
           
           {selectedProduct ? (
             <div className="chart-container">

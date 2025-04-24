@@ -1,44 +1,73 @@
-import { useEffect, useState } from "react";
-import { db } from "../firebaseConfig";
-import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
+import React, { useState } from 'react';
+import PropTypes from 'prop-types';
+import EditModal from './EditModal';
 
-function ProductList() {
-  const [products, setProducts] = useState([]);
- 
-  useEffect(() => {
-    const fetchProducts = async () => {
-      const querySnapshot = await getDocs(collection(db, "products"));
-      const productList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setProducts(productList);
-    };
-    fetchProducts();
-  }, []);
+const ProductList = ({ products, onDelete, onEdit }) => {
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
 
-  const handleUpdatePrice = async (id, newPrice) => {
-    try {
-      await updateDoc(doc(db, "products", id), { price: parseFloat(newPrice) });
-      alert("Precio actualizado ✅");
-    } catch (error) {
-      console.error("Error al actualizar precio:", error);
-    }
+  const handleEditClick = (product) => {
+    setSelectedProduct(product);
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditSave = (editedProduct) => {
+    onEdit(selectedProduct.id, editedProduct);
+    setIsEditModalOpen(false);
+    setSelectedProduct(null);
   };
 
   return (
-    <div className="p-4">
-      <h2 className="text-xl mb-2">Lista de Productos</h2>
-      {products.map(product => (
-        <div key={product.id} className="mb-4">
-          <p>{product.name} - {product.brand} - ${product.price}</p>
-          <input
-            type="number"
-            placeholder="Nuevo precio"
-            onBlur={(e) => handleUpdatePrice(product.id, e.target.value)}
-            className="border p-2"
-          />
+    <div className="product-list">
+      {products.map((product) => (
+        <div key={product.id} className="product-item">
+          <div className="product-info">
+            <span className="product-name">{product.name}</span>
+            <span className="product-quantity">
+              {product.quantity} {product.unit}
+            </span>
+          </div>
+          <div className="product-actions">
+            <button
+              className="btn-edit"
+              onClick={() => handleEditClick(product)}
+            >
+              Editar
+            </button>
+            <button
+              className="btn-delete"
+              onClick={() => onDelete(product.id)}
+            >
+              Eliminar
+            </button>
+          </div>
         </div>
       ))}
+
+      <EditModal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setSelectedProduct(null);
+        }}
+        onSave={handleEditSave}
+        product={selectedProduct}
+      />
     </div>
   );
-}
+};
+
+ProductList.propTypes = {
+  products: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string.isRequired,
+      name: PropTypes.string.isRequired,
+      quantity: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+      unit: PropTypes.string.isRequired,
+    })
+  ).isRequired,
+  onDelete: PropTypes.func.isRequired,
+  onEdit: PropTypes.func.isRequired,
+};
 
 export default ProductList;
